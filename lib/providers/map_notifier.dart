@@ -14,7 +14,6 @@ class MapNotifier extends ChangeNotifier {
     var result = await Api().getLocationList();
     if (result.data != null) {
       data.addAll(result.data!);
-      notifyListeners();
     }
   }
 
