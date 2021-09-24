@@ -1,4 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:seaoil/providers/main/login_notifier.dart';
+import 'package:seaoil/routing/routes.dart';
+import 'package:seaoil/widgets/dialogs.dart';
+import 'package:provider/provider.dart';
+import 'package:velocity_x/velocity_x.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -34,6 +39,26 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  void login() async {
+    if (_formKey!.currentState!.validate()) {
+      iosLoading(context);
+
+      var res = await context
+          .read<LoginNotifier>()
+          .loginUser(mobile: number!.text, password: password!.text);
+      print(res);
+      if (res == true) {
+        Navigator.of(context).pop();
+        await VxNavigator.of(context).clearAndPush(Uri(path: MapPath));
+        passwordNode?.unfocus();
+        emailNode?.unfocus();
+      } else {
+        Navigator.of(context, rootNavigator: true).pop();
+        showAlertDialog(context, res);
+      }
+    }
+  }
+
   Widget title() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -44,7 +69,7 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         Text(
           'Enter your details',
-          style: TextStyle(fontSize: 36.0, fontWeight: FontWeight.bold),
+          style: TextStyle(fontSize: 15.0, fontWeight: FontWeight.w500),
         ),
       ],
     );
@@ -149,6 +174,20 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  Widget _loginButton() {
+    return FloatingActionButton.extended(
+        onPressed: login,
+        backgroundColor: Colors.white,
+        icon: const Icon(Icons.arrow_forward_rounded,
+            size: 20.0, color: Colors.black),
+        isExtended: true,
+        label: const Text(
+          'Login',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.black),
+        ));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -168,6 +207,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ],
         ),
       ),
+      floatingActionButton: _loginButton(),
     );
   }
 }

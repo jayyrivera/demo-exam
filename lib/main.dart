@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:seaoil/providers/main/main_notifier.dart';
+import 'package:seaoil/providers/map_notifier.dart';
 import 'package:seaoil/routing/obs.dart';
 import 'package:seaoil/routing/routes.dart';
 import 'package:seaoil/screens/login_screen.dart';
+import 'package:seaoil/screens/map_screen.dart';
+import 'package:seaoil/utils/constants.dart';
+import 'package:seaoil/utils/sharedprefs.dart';
 import 'package:velocity_x/velocity_x.dart';
 
 import 'providers/main/login_notifier.dart';
@@ -44,6 +48,25 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
+  var isLoggedIn = false;
+
+  @override
+  void didChangeDependencies() async {
+    // TODO: implement didChangeDependencies
+    isLoggedIn = await check();
+    setState(() {});
+    super.didChangeDependencies();
+  }
+
+  Future<bool> check() async {
+    var token = await SharedPrefUtils.readPrefStr(Constants.token_key);
+    if (token != null) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp.router(
@@ -67,10 +90,27 @@ class _MyHomePageState extends State<MyHomePage> {
       title: 'SeaOil',
       debugShowCheckedModeBanner: false,
       routerDelegate: VxNavigator(routes: {
-        Main: (_, __) => MaterialPage(
-            child: ChangeNotifierProvider<LoginNotifier>(
-                create: (context) => LoginNotifier(),
-                child: const LoginScreen())),
+        Main: (_, __) {
+          if (isLoggedIn) {
+            return MaterialPage(
+                child: ChangeNotifierProvider<MapNotifier>(
+                    lazy: false,
+                    create: (context) => MapNotifier(),
+                    child: const MapScreen()));
+          } else {
+            return MaterialPage(
+                child: ChangeNotifierProvider<LoginNotifier>(
+                    create: (context) => LoginNotifier(),
+                    child: const LoginScreen()));
+          }
+        },
+        MapPath: (_, __) {
+          return MaterialPage(
+              child: ChangeNotifierProvider<MapNotifier>(
+                  lazy: false,
+                  create: (context) => MapNotifier(),
+                  child: const MapScreen()));
+        }
       }, observers: [
         MyObs()
       ]),
