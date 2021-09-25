@@ -2,12 +2,14 @@ import 'dart:async';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:seaoil/models/list.dart';
 import 'package:seaoil/models/location.dart';
 import 'package:seaoil/providers/map_notifier.dart';
 import 'package:seaoil/utils/constants.dart';
 import 'package:seaoil/utils/sharedprefs.dart';
 import 'package:seaoil/utils/tools.dart';
 import 'package:provider/provider.dart';
+import 'package:seaoil/widgets/bottom_sheet.dart';
 import 'package:sliding_up_panel/sliding_up_panel.dart';
 
 class MapScreen extends StatefulWidget {
@@ -17,36 +19,49 @@ class MapScreen extends StatefulWidget {
   _MapScreenState createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   final Completer<GoogleMapController> _controller = Completer();
-  PanelController _pc = new PanelController();
+  final PanelController _pc = PanelController();
   static const CameraPosition _loc =
       CameraPosition(target: LatLng(14.582919, 120.979683), zoom: 15);
   final List<Marker> _markers = <Marker>[];
-  final double _initFabHeight = 110.0;
+  final double _initFabHeight = 255.0;
   double _fabHeight = 0;
   double _panelHeightOpen = 500;
-  double _panelHeightClosed = 100.0;
-  List<Data> data = [];
+  double _panelHeightClosed = 250.0;
+  var showDetails = false;
+  ItemData? data;
+
+  AnimationController? controllerAnim;
+  AnimationController? controllerAnimDetails;
 
   @override
   void initState() {
     // TODO: implement initState
+    controllerAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    controllerAnimDetails = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
     _fabHeight = _initFabHeight;
     super.initState();
-    _determinePosition();
   }
 
   @override
   void didChangeDependencies() async {
     // TODO: implement didChangeDependencies
-
+    _determinePosition();
     super.didChangeDependencies();
   }
 
   @override
   void dispose() {
     // TODO: implement dispose
+    controllerAnim?.dispose();
+    controllerAnimDetails?.dispose();
     super.dispose();
   }
 
@@ -84,6 +99,7 @@ class _MapScreenState extends State<MapScreen> {
         icon: BitmapDescriptor.fromBytes(markerIcon),
         infoWindow: const InfoWindow(title: 'You are here!'));
     _markers.add(marker);
+    Provider.of<MapNotifier>(context, listen: false).getLocationList(position);
     setState(() {});
   }
 
@@ -105,6 +121,31 @@ class _MapScreenState extends State<MapScreen> {
     setState(() {});
   }
 
+  void setMarker(
+      {required double lat,
+      required double lng,
+      required String location}) async {
+    final markerIcon =
+        await Tools().getBytesFromAsset("assets/station.png", 80);
+    var marker = Marker(
+        markerId: const MarkerId('station'),
+        position: LatLng(lat, lng),
+        icon: BitmapDescriptor.fromBytes(markerIcon),
+        infoWindow: InfoWindow(title: location));
+    if (_markers.length != 1) {
+      var index = _markers.indexWhere(
+          (element) => element.markerId == const MarkerId('station'));
+      _markers.removeAt(index);
+      _markers.add(marker);
+    } else {
+      _markers.add(marker);
+    }
+
+    final controller = await _controller.future;
+    await controller.animateCamera(CameraUpdate.newCameraPosition(
+        CameraPosition(target: LatLng(lat, lng), zoom: 15)));
+  }
+
   Widget map() {
     return GoogleMap(
       mapType: MapType.normal,
@@ -117,6 +158,71 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  Widget details() {
+    var distance = data!.distance / 1000;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(data!.data.name!,
+            style: const TextStyle(
+                color: Colors.black, fontWeight: FontWeight.bold)),
+        Text(
+          data!.data.address!,
+          style: const TextStyle(
+              color: Colors.black, fontSize: 12.0, fontWeight: FontWeight.w400),
+          maxLines: 2,
+        ),
+        const SizedBox(
+          height: 14.0,
+        ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const Icon(Icons.directions_car_sharp,
+                    size: 15.0, color: Colors.black),
+                const SizedBox(
+                  width: 4.0,
+                ),
+                Text(
+                  '${distance.toStringAsFixed(2)} km away',
+                  style: const TextStyle(
+                      color: Colors.black,
+                      fontSize: 12.0,
+                      fontWeight: FontWeight.w400),
+                  maxLines: 2,
+                ),
+              ],
+            ),
+            const SizedBox(
+              width: 6.0,
+            ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: const [
+                Icon(Icons.access_time_outlined,
+                    size: 15.0, color: Colors.black),
+                SizedBox(
+                  width: 4.0,
+                ),
+                Text(
+                  'Open 24 Hours',
+                  style: TextStyle(
+                      color: Colors.black,
+                      fontSize: 12.0,
+                      fontWeight: FontWeight.w400),
+                  maxLines: 2,
+                ),
+              ],
+            ),
+          ],
+        )
+      ],
+    );
+  }
+
   Widget _panel(ScrollController sc) {
     return Container(
       padding: const EdgeInsets.only(top: 18.0),
@@ -124,17 +230,32 @@ class _MapScreenState extends State<MapScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           ListTile(
-            leading: const Text(
-              'Nearby Station',
-              style:
-                  TextStyle(color: Colors.black, fontWeight: FontWeight.w500),
+            leading: InkWell(
+              onTap: () {
+                if (showDetails) {
+                  setState(() {
+                    showDetails = false;
+                    data = null;
+                  });
+                  controllerAnim?.reverse();
+                  controllerAnimDetails?.reverse();
+                }
+              },
+              child: Text(
+                (showDetails) ? 'Back To List' : 'Nearby Station',
+                style: TextStyle(
+                    color: (showDetails) ? Colors.blue : Colors.grey,
+                    fontWeight: FontWeight.w500),
+              ),
             ),
             trailing: TextButton(
-              onPressed: () {},
-              child: const Text(
+              onPressed: () {
+                if (showDetails) {}
+              },
+              child: Text(
                 'Done',
                 style: TextStyle(
-                  color: Colors.black,
+                  color: (showDetails) ? Colors.blue : Colors.black,
                 ),
               ),
             ),
@@ -144,38 +265,94 @@ class _MapScreenState extends State<MapScreen> {
           ),
           Consumer<MapNotifier>(
             builder: (context, value, __) {
-              return Expanded(
-                child: ListView.builder(
-                    padding: const EdgeInsets.only(left: 12.0, right: 12.0),
-                    controller: sc,
-                    shrinkWrap: true,
-                    itemBuilder: (context, index) {
-                      return ListTile(
-                        leading: Text(value.data[index]!.name!,
-                            style: const TextStyle(
-                                color: Colors.black,
-                                fontWeight: FontWeight.bold)),
-                        trailing: Theme(
-                          data: Theme.of(context).copyWith(
-                            unselectedWidgetColor: Colors.grey,
-                          ),
-                          child: SizedBox(
-                            height: 25.0,
-                            width: 25.0,
-                            child: Radio(
-                              value: index,
-                              groupValue: value.rData,
-                              onChanged: (val) {
-                                value.radioValue(index);
-                              },
-                              activeColor: const Color(0xff6c3eb5),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                    itemCount: value.data.length),
-              );
+              if (value.isLoading) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              return (showDetails)
+                  ? SlideTransition(
+                      position: Tween<Offset>(
+                        begin: const Offset(1.0, 0.0),
+                        end: Offset.zero,
+                      ).animate(CurvedAnimation(
+                        parent: controllerAnimDetails!,
+                        curve: Curves.easeOut,
+                      )),
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 14.0),
+                        child: details(),
+                      ))
+                  : Expanded(
+                      child: SlideTransition(
+                        position: Tween<Offset>(
+                          begin: Offset.zero,
+                          end: const Offset(-1.0, 0.0),
+                        ).animate(CurvedAnimation(
+                          parent: controllerAnim!,
+                          curve: Curves.easeOut,
+                        )),
+                        child: ListView.builder(
+                            padding: const EdgeInsets.only(right: 12.0),
+                            controller: sc,
+                            shrinkWrap: true,
+                            itemBuilder: (context, index) {
+                              var totalDistance =
+                                  value.data[index].distance / 1000;
+                              return ListTile(
+                                leading: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(value.data[index].data.name!,
+                                        style: const TextStyle(
+                                            color: Colors.black,
+                                            fontWeight: FontWeight.bold)),
+                                    const SizedBox(
+                                      height: 4.0,
+                                    ),
+                                    Text(
+                                        '${totalDistance.toStringAsFixed(2)} km away from you',
+                                        style: const TextStyle(
+                                            color: Colors.black,
+                                            fontSize: 12.0,
+                                            fontWeight: FontWeight.w400)),
+                                  ],
+                                ),
+                                trailing: Theme(
+                                  data: Theme.of(context).copyWith(
+                                    unselectedWidgetColor: Colors.grey,
+                                  ),
+                                  child: SizedBox(
+                                    height: 25.0,
+                                    width: 25.0,
+                                    child: Radio(
+                                      value: value.data[index].data,
+                                      groupValue: value.rData,
+                                      onChanged: (val) async {
+                                        value
+                                            .radioValue(value.data[index].data);
+                                        setMarker(
+                                            lat: double.parse(
+                                                value.data[index].data.lat!),
+                                            lng: double.parse(
+                                                value.data[index].data.lng!),
+                                            location:
+                                                value.data[index].data.name!);
+                                        setState(() {
+                                          showDetails = true;
+                                          data = value.data[index];
+                                        });
+                                        controllerAnim?.forward();
+                                        controllerAnimDetails?.forward();
+                                      },
+                                      activeColor: const Color(0xff6c3eb5),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                            itemCount: value.data.length),
+                      ),
+                    );
             },
           )
         ],
@@ -213,6 +390,7 @@ class _MapScreenState extends State<MapScreen> {
         alignment: Alignment.topCenter,
         children: [
           SlidingUpPanel(
+            controller: _pc,
             maxHeight: _panelHeightOpen,
             minHeight: _panelHeightClosed,
             body: map(),
