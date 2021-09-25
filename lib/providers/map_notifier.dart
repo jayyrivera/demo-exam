@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 class MapNotifier extends ChangeNotifier {
   List<ItemData> data = [];
   Data rData = Data();
+  var filterData = <ItemData>[];
   var isLoading = false;
 
   void getLocationList(Position position) async {
@@ -19,11 +20,22 @@ class MapNotifier extends ChangeNotifier {
             position.longitude, double.parse(i.lat!), double.parse(i.lng!));
 
         data.add(ItemData(i, distanceInMeters));
+        filterData.add(ItemData(i, distanceInMeters));
       }
       data.sort((x, y) => x.distance.compareTo(y.distance));
+      filterData.sort((x, y) => x.distance.compareTo(y.distance));
+
       isLoading = false;
       notifyListeners();
     }
+  }
+
+  void searchStations(String q) {
+    filterData = data
+        .where(
+            (text) => text.data.name!.toUpperCase().contains(q.toUpperCase()))
+        .toList();
+    notifyListeners();
   }
 
   void radioValue(Data value) {

@@ -3,13 +3,14 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:seaoil/models/list.dart';
-import 'package:seaoil/models/location.dart';
 import 'package:seaoil/providers/map_notifier.dart';
+import 'package:seaoil/screens/search_screen.dart';
 import 'package:seaoil/utils/constants.dart';
+import 'package:seaoil/utils/debounces.dart';
 import 'package:seaoil/utils/sharedprefs.dart';
 import 'package:seaoil/utils/tools.dart';
 import 'package:provider/provider.dart';
-import 'package:seaoil/widgets/bottom_sheet.dart';
+import 'package:seaoil/widgets/dialogs.dart';
 import 'package:sliding_up_panel/sliding_up_panel.dart';
 
 class MapScreen extends StatefulWidget {
@@ -21,6 +22,9 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   final Completer<GoogleMapController> _controller = Completer();
+  final TextEditingController search = TextEditingController();
+  final FocusNode searchFocusNode = FocusNode();
+  final _debouncer = Debouncer();
   final PanelController _pc = PanelController();
   static const CameraPosition _loc =
       CameraPosition(target: LatLng(14.582919, 120.979683), zoom: 15);
@@ -30,6 +34,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   double _panelHeightOpen = 500;
   double _panelHeightClosed = 250.0;
   var showDetails = false;
+  var isSearching = false;
+  var appBarHeight = 50.0;
+  var appBarHeightSize = 25.0;
+  var isMapLoading = true;
   ItemData? data;
 
   AnimationController? controllerAnim;
@@ -47,13 +55,15 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       duration: const Duration(milliseconds: 500),
     );
     _fabHeight = _initFabHeight;
+
     super.initState();
+    _determinePosition();
   }
 
   @override
   void didChangeDependencies() async {
     // TODO: implement didChangeDependencies
-    _determinePosition();
+
     super.didChangeDependencies();
   }
 
@@ -83,6 +93,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       return Future.error(
           'Location permissions are permanently denied, we cannot request permissions.');
     }
+    iosLoading(context);
     // no need to use google my location feature since geolocator already gets the phones location
     _markers.clear();
     var position = await Geolocator.getCurrentPosition();
@@ -100,6 +111,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         infoWindow: const InfoWindow(title: 'You are here!'));
     _markers.add(marker);
     Provider.of<MapNotifier>(context, listen: false).getLocationList(position);
+    isMapLoading = false;
+    Navigator.pop(context);
     setState(() {});
   }
 
@@ -135,10 +148,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     if (_markers.length != 1) {
       var index = _markers.indexWhere(
           (element) => element.markerId == const MarkerId('station'));
-      _markers.removeAt(index);
-      _markers.add(marker);
+      setState(() {
+        _markers.removeAt(index);
+        _markers.add(marker);
+      });
     } else {
-      _markers.add(marker);
+      setState(() {
+        _markers.add(marker);
+      });
     }
 
     final controller = await _controller.future;
@@ -244,7 +261,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               child: Text(
                 (showDetails) ? 'Back To List' : 'Nearby Station',
                 style: TextStyle(
-                    color: (showDetails) ? Colors.blue : Colors.grey,
+                    color: (showDetails) ? Colors.blue : Colors.black,
                     fontWeight: FontWeight.w500),
               ),
             ),
@@ -255,7 +272,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               child: Text(
                 'Done',
                 style: TextStyle(
-                  color: (showDetails) ? Colors.blue : Colors.black,
+                  color: (showDetails) ? Colors.blue : Colors.grey,
                 ),
               ),
             ),
@@ -337,12 +354,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                                 value.data[index].data.lng!),
                                             location:
                                                 value.data[index].data.name!);
-                                        setState(() {
-                                          showDetails = true;
-                                          data = value.data[index];
-                                        });
+                                        showDetails = true;
+                                        data = value.data[index];
+
                                         controllerAnim?.forward();
                                         controllerAnimDetails?.forward();
+                                        setState(() {});
                                       },
                                       activeColor: const Color(0xff6c3eb5),
                                     ),
@@ -360,6 +377,71 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
+  Widget searchList() {
+    return Consumer<MapNotifier>(
+      builder: (context, value, __) {
+        return ListView.builder(
+            padding: const EdgeInsets.only(right: 12.0, left: 12.0),
+            shrinkWrap: true,
+            itemBuilder: (context, index) {
+              var totalDistance = value.filterData[index].distance / 1000;
+              return ListTile(
+                leading: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(value.filterData[index].data.name!,
+                        style: const TextStyle(
+                            color: Colors.black, fontWeight: FontWeight.bold)),
+                    const SizedBox(
+                      height: 4.0,
+                    ),
+                    Text('${totalDistance.toStringAsFixed(2)} km away from you',
+                        style: const TextStyle(
+                            color: Colors.black,
+                            fontSize: 12.0,
+                            fontWeight: FontWeight.w400)),
+                  ],
+                ),
+                trailing: Theme(
+                  data: Theme.of(context).copyWith(
+                    unselectedWidgetColor: Colors.grey,
+                  ),
+                  child: SizedBox(
+                    height: 25.0,
+                    width: 25.0,
+                    child: Radio(
+                      value: value.filterData[index].data,
+                      groupValue: value.rData,
+                      onChanged: (val) async {
+                        isSearching = false;
+                        appBarHeight = 50;
+                        appBarHeightSize = 25;
+
+                        value.radioValue(value.filterData[index].data);
+                        setMarker(
+                            lat:
+                                double.parse(value.filterData[index].data.lat!),
+                            lng:
+                                double.parse(value.filterData[index].data.lng!),
+                            location: value.filterData[index].data.name!);
+                        showDetails = true;
+                        data = value.filterData[index];
+                        controllerAnim?.forward();
+                        controllerAnimDetails?.forward();
+                        setState(() {});
+                      },
+                      activeColor: const Color(0xff6c3eb5),
+                    ),
+                  ),
+                ),
+              );
+            },
+            itemCount: value.filterData.length);
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -370,49 +452,113 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         actions: <Widget>[
           IconButton(
             onPressed: () async {
-              SharedPrefUtils.deletePrefs(Constants.token_key);
+              if (isSearching) {
+                isSearching = false;
+                appBarHeight = 50;
+                appBarHeightSize = 25;
+              } else {
+                appBarHeight = 80;
+                appBarHeightSize = 80;
+                isSearching = true;
+              }
+              setState(() {});
             },
-            icon: const Icon(Icons.search),
+            icon: Icon((isSearching) ? Icons.close : Icons.search),
           )
         ],
         elevation: 5.0,
         bottom: PreferredSize(
             child: Container(
               alignment: Alignment.center,
-              constraints: const BoxConstraints.expand(height: 25),
-              child: const Text(
-                "Which PriceLOCQ station will you likely visit?",
+              constraints: BoxConstraints.expand(height: appBarHeightSize),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const Text(
+                    "Which PriceLOCQ station will you likely visit?",
+                  ),
+                  const SizedBox(height: 6.0),
+                  Visibility(
+                    visible: isSearching,
+                    maintainSize: false,
+                    child: SizedBox(
+                      width: 280.0,
+                      child: TextFormField(
+                        controller: search,
+                        focusNode: searchFocusNode,
+                        onChanged: (query) {
+                          _debouncer(() {});
+                          context.read<MapNotifier>().searchStations(query);
+                        },
+                        style: const TextStyle(color: Colors.black),
+                        decoration: InputDecoration(
+                          hintText: 'Search',
+                          hintStyle: TextStyle(color: Colors.grey),
+                          isDense: true,
+                          filled: true,
+                          fillColor: Colors.white,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: -8, vertical: 5),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(
+                              width: 0,
+                              style: BorderStyle.none,
+                            ),
+                          ),
+                          prefixIcon: const Icon(
+                            Icons.search,
+                            color: Colors.black,
+                          ),
+                          prefixIconConstraints: const BoxConstraints(
+                            minWidth: 25,
+                            minHeight: 35,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            preferredSize: const Size.fromHeight(25.0)),
+            preferredSize: Size.fromHeight(appBarHeight)),
       ),
       body: Stack(
         alignment: Alignment.topCenter,
         children: [
-          SlidingUpPanel(
-            controller: _pc,
-            maxHeight: _panelHeightOpen,
-            minHeight: _panelHeightClosed,
-            body: map(),
-            panelBuilder: (sc) => _panel(sc),
-            borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(18.0),
-                topRight: Radius.circular(18.0)),
-            onPanelSlide: (double pos) => setState(() {
-              _fabHeight = pos * (_panelHeightOpen - _panelHeightClosed) +
-                  _initFabHeight;
-            }),
+          Visibility(visible: isSearching, child: searchList()),
+
+          Visibility(
+            visible: !isSearching,
+            maintainState: true,
+            child: SlidingUpPanel(
+              controller: _pc,
+              maxHeight: _panelHeightOpen,
+              minHeight: _panelHeightClosed,
+              body: map(),
+              panelBuilder: (sc) => _panel(sc),
+              borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(18.0),
+                  topRight: Radius.circular(18.0)),
+              onPanelSlide: (double pos) => setState(() {
+                _fabHeight = pos * (_panelHeightOpen - _panelHeightClosed) +
+                    _initFabHeight;
+              }),
+            ),
           ),
 
           /// Created this FAB because the my location button of google maps goes on the upper right corner
-          Positioned(
-            right: 15.0,
-            bottom: _fabHeight,
-            child: FloatingActionButton(
-              elevation: 2.5,
-              child: const Icon(Icons.gps_fixed),
-              onPressed: getUserLocation,
-              backgroundColor: Colors.white,
+          Visibility(
+            visible: !isSearching,
+            child: Positioned(
+              right: 15.0,
+              bottom: _fabHeight,
+              child: FloatingActionButton(
+                elevation: 2.5,
+                child: const Icon(Icons.gps_fixed),
+                onPressed: getUserLocation,
+                backgroundColor: Colors.white,
+              ),
             ),
           ),
         ],
